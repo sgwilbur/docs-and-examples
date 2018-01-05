@@ -1,6 +1,7 @@
 /*
 This pipeline example is to deploy an application stored in Nexus.  It is assumed that a Jenkins agent is running on the
-target build environment.
+target build environment.  In this example, this job is actaully a wrapper that downloads the release candidate from
+Nexus Repo then uses a deployment script that was stored in the package for the deployment steps.
 
 ***Note that Jenkins is not a recommended deployment tool, however, this is an example of how
 Jenkins can be used for deployment.**
@@ -130,8 +131,9 @@ pipeline
     stage( 'Deploy' ){
       steps{
         sh "mv ${ARTIFACT_FILENAME} ${TARGET_APPLICATION}-${params.TARGET_VERSION}.zip"
+        // deploy app by calling deployment script in extracted build package
         sh "./deploy/deploy-nodeapp.sh ${TARGET_APPLICATION} ${params.TARGET_VERSION} ${DEPLOY_ENV}"
-        // cleanup old versions on the machine
+        // cleanup old versions on the machine by calling cleanup script in extracted build package
         sh "./deploy/cleanup-old-versions.sh ${TARGET_APPLICATION} ${params.TARGET_VERSION}"
       }
     }
