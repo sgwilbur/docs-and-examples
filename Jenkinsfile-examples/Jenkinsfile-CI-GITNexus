@@ -1,0 +1,207 @@
+/*
+This pipeline build example is for a Nodejs application.  The stages within this pipeline will build the app, package the app
+into a zip file, perform a Nexus IQ scan, then call a downstream job to deploy the app to an environment.  These builds are
+considered to be throw away as no GIT tag is created and the build is not stored in Nexus Repo.  This build is intended to
+be a developer quick test.
+
+Authors:
+Sean Wilbur (sean.wilbur@perficient.com)
+Geoff Rosenthal (geoffrey.rosenthal@perficient.com)
+*/
+
+//Leverage Jenkins shared library
+@Library('jenkins-shared-library') _
+
+pipeline{
+  //Assume nodes with label nodejs have NPM installed for build
+  agent { label 'nodejs' }
+
+  options {
+    disableConcurrentBuilds()
+    // prevents checkout from automatically happen on deployment nodes
+    skipDefaultCheckout()
+  }
+
+  environment {
+    // Globally Defined
+
+    // Provide application specific name for use in Nexus
+    NEXUS_ARTIFACTID="App_Name"
+
+    // variables used during build
+    ARTIFACT_FILENAME=""
+    DEPLOY_ENV=''
+    NEXUS_IQ_STAGE=''
+    TARGET_APPLICATION=""
+    TARGET_VERSION=""
+    VERSION_TAG=""
+
+  }//End environment
+
+  parameters {
+
+    booleanParam (
+      name: 'QUICK_BUILD',
+      defaultValue: true,
+      description: 'Build quick node, intended for simple CI builds, checked turns \noff stages for faster testing of Jenkinsfile'
+    )
+
+    booleanParam (
+      name: 'AUTO_DEPLOY',
+      defaultValue: false,
+      description: 'Enable or disable auto-deployment.'
+    )
+
+  }//End parameters
+
+  triggers {
+    // Poll SCM every 15 minutes for changes
+    pollSCM('H/15 * * * *')
+  }
+
+  stages{
+
+    stage( "Clean WorkSpace" ) {
+      // Cleanup the workspace to start from scratch
+      when { expression{ params.QUICK_BUILD == false } }
+      steps{
+        cleanWs()
+      }
+    }//End Clean WorkSpace
+
+    stage( 'Checkout Source' ) {
+    //Checkout source code from GIT
+      steps{
+        // workaround to get GIT plugin environment Variables, we need to collect the checkout command output, which is a map that contains them
+        // https://issues.jenkins-ci.org/browse/JENKINS-35230
+          script{
+            scm_map = checkout scm
+            GIT_BRANCH = scm_map['GIT_BRANCH']
+            // get just the branch name minus the remote only splitting on first
+            // match in case the rest of the branch has more '/' chars.
+            GIT_BRANCH_NAME = GIT_BRANCH.split('/',2)[1]
+          }
+          sh "echo 'Checkout of GIT branch: ${GIT_BRANCH}'"
+          sh "echo 'GIT_BRANCH_NAME: ${GIT_BRANCH_NAME}'"
+        }
+    }//End Checkout Source
+
+  	stage( "Setup Environment Variables" ) {
+    //Setup environment variables to be used later in build.  In this example, Jenkins was used for deployment.  Deployment target Environment
+    //was based upon which branch build was created from.
+      steps{
+        script {
+
+          switch (GIT_BRANCH_NAME) {
+            case 'master':
+              DEPLOY_ENV = 'devint2'
+              NEXUS_IQ_STAGE = 'build'
+              break
+            case 'develop':
+              DEPLOY_ENV = 'devint'
+              NEXUS_IQ_STAGE = 'develop'
+              break
+            default:
+             // empty DEPLOY_ENV will skip deployment stage
+              DEPLOY_ENV = ''
+              break
+          }
+          //Find and store semantic version as specified in package.json to use to create build version label
+          def props = readJSON file: 'package.json'
+          def version = props['version']
+
+          def ecosystem = readJSON file: 'ecosystem.json'
+          // Found silly issue where the default GStringImpl cannot be used to
+          // directly compare to the values that are default String objects
+          def env_match_string = "env_${DEPLOY_ENV}" as String
+          TARGET_APPLICATION = ''
+          ecosystem.apps.each{ app ->
+            if( app.keySet().contains( env_match_string ) ){
+              TARGET_APPLICATION = app.name
+            }
+          }
+          //Define unique build version
+          TARGET_VERSION = "$version-$BUILD_TIMESTAMP_STRING"
+          VERSION_TAG="${TARGET_VERSION}"
+          ARTIFACT_FILENAME="${NEXUS_ARTIFACTID}-${VERSION_TAG}.zip"
+          // modify build name to match
+          currentBuild.displayName = "${VERSION_TAG}_${DEPLOY_ENV}"
+        } // end script
+        // output some information about the environment we just setup
+        sh "echo 'version: ${TARGET_VERSION}'"
+        sh "echo 'version_tag: ${VERSION_TAG}'"
+        sh "echo 'artifact_filename: ${ARTIFACT_FILENAME}'"
+        sh "echo 'deploy_env: ${DEPLOY_ENV}'"
+        sh "echo 'target_application: ${TARGET_APPLICATION}'"
+      }
+    }//End Setup Environment Variables
+
+    stage( "NPM Install" ) {
+      steps{
+        sh 'npm install'
+      }
+    }//End Install Packages
+
+    stage( "NPM Test" ) {
+      steps{
+        sh 'npm run test'
+      }
+    }//End Run NPM Test
+
+    stage( "NPM Build" ) {
+      steps{
+        sh 'npm run build'
+
+        // also copy our deploy folder to be packaged with build
+        sh 'cp -r deploy build/'
+        sh 'cp -r node_modules build/'
+      }
+    }//End Build Package and NPM Install
+
+    stage( "Package into zip file" ){
+      steps{
+        dir( "build" ){
+          sh "zip -r --quiet ../${ARTIFACT_FILENAME} *"
+         }
+         //Save the build to be deployed to DEV environment
+         stash includes: ARTIFACT_FILENAME, name: 'SAVED_BUILD'
+      }
+    }//End Package into zip file
+
+    stage( "Perform Nexus IQ Scan") {
+      steps{
+            sh "echo 'Uploading to IQ: ${NEXUS_ARTIFACTID} stage: ${NEXUS_IQ_STAGE} file: ${ARTIFACT_FILENAME}'"
+          	nexusPolicyEvaluation failBuildOnNetworkError: false,
+                iqApplication: NEXUS_ARTIFACTID,
+                iqScanPatterns: [[scanPattern: ARTIFACT_FILENAME ]],
+                iqStage: NEXUS_IQ_STAGE,
+                jobCredentialsId: ''
+      }
+    }//End IQ Scans
+
+    stage( "Clean WorkSpace post build" ) {
+      when { expression{ params.QUICK_BUILD == false } }
+      steps{
+      dir( "build" ){
+        deleteDir()
+       }
+      }
+    }//End Clean WorkSpace
+
+    stage("Deploy to dev integration environment"){
+      when { expression{ params.AUTO_DEPLOY && env.DEPLOY_ENV != '' && env.TARGET_APPLICATION != '' } }
+      agent { label env.DEPLOY_ENV }
+      steps{
+        sh "echo 'Deploying $ARTIFACT_FILENAME to ${DEPLOY_ENV}'"
+        cleanWs()
+        unstash 'SAVED_BUILD'
+        sh "mv ${ARTIFACT_FILENAME} ${TARGET_APPLICATION}-${TARGET_VERSION}.zip"
+        sh "unzip -qo ${TARGET_APPLICATION}-${TARGET_VERSION}.zip"
+        sh "./deploy/deploy-nodeapp.sh ${TARGET_APPLICATION} ${TARGET_VERSION} ${DEPLOY_ENV}"
+        sh "./deploy/cleanup-old-versions.sh ${TARGET_APPLICATION} ${TARGET_VERSION}"
+      }//End steps
+    }//End Deploy to devint
+
+
+  }//end stages
+}//end pipeline

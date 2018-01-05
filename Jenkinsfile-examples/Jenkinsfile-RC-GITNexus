@@ -1,0 +1,168 @@
+/*
+This pipeline build example is for a Nodejs application.  The stages within this pipeline will build the app, tag GIT, package
+the app into a zip file, perform a Nexus IQ scan, then upload the build into Nexus Repo to be deployed later.  These builds are
+considered release candidates that could be deployed to any environment.
+
+Authors:
+Sean Wilbur (sean.wilbur@perficient.com)
+Geoff Rosenthal (geoffrey.rosenthal@perficient.com)
+*/
+
+//Leverage Jenkins shared library
+@Library('jenkins-shared-library') _
+
+pipeline{
+  //Assume nodes with label nodejs have NPM installed for build
+  agent { label 'nodejs' }
+
+  options {
+    disableConcurrentBuilds()
+  }
+
+  environment {
+
+    // Application Specific
+    GIT_PROJECT="Perficient-DevOps/AppRepo" //Provide GIT repo for app
+    NEXUS_REPOSITORY="Team-RCs"  //Provide name of Nexus Repo where builds will be stored
+    NEXUS_GROUP="TheGroup"  //Proivde name of Nexus repository group
+    NEXUS_ARTIFACTID="App_Name"  //Provide name for app in Nexus Repo
+
+
+    // build time Variables
+    TARGET_VERSION=''
+    VERSION_TAG=''
+    ARTIFACT_FILENAME=''
+    NEXUS_IQ_STAGE=''
+  }
+
+  parameters {
+    booleanParam (
+      name: 'TAG_GIT',
+      defaultValue: false,
+      description: 'Enable or disable tagging the commit in Git for reference.'
+    )
+  }
+
+  // poll for RC builds
+  triggers {
+    // Poll SCM every 60 minutes for changes
+    pollSCM('H/60 * * * *')
+  }
+
+  stages{
+    // Cleanup the workspace to start from scratch
+    stage( "Clean WorkSpace and checkout source" ) {
+      steps{
+        cleanWs()
+        // workaround to get GIT plugin environment Variables, we need to collect the checkout command output, which is a map that contains them
+        // https://issues.jenkins-ci.org/browse/JENKINS-35230
+        script{
+          scm_map = checkout scm
+          GIT_BRANCH = scm_map['GIT_BRANCH']
+          // get just the branch name minus the remote only splitting on first
+          // match in case the rest of the branch has more '/' chars.
+          GIT_BRANCH_NAME = GIT_BRANCH.split('/',2)[1]
+        }
+      }
+    }
+
+    stage( "Setup Environment Variables" ) {
+      steps{
+        script {
+
+          switch (GIT_BRANCH_NAME) {
+            case 'master':
+              NEXUS_IQ_STAGE = 'release'
+              break
+            case 'develop':
+              NEXUS_IQ_STAGE = 'stage-release'
+              break
+            default:
+             // empty DEPLOY_ENV will skip deployment stage
+              DEPLOY_ENV = ''
+              break
+          }
+          //Find and store semantic version as specified in package.json to use to create build version label
+          def props = readJSON file: 'package.json'
+          def version = props['version']
+
+          //Define unique build version
+          TARGET_VERSION = "$version-$BUILD_TIMESTAMP_STRING"
+          VERSION_TAG="${TARGET_VERSION}"
+          ARTIFACT_FILENAME="${NEXUS_ARTIFACTID}-${VERSION_TAG}.zip"
+          // modify build name to match
+          currentBuild.displayName = "${VERSION_TAG}"
+        }
+        // output some information about the environment we just setup
+        sh "echo 'package.json version: ${TARGET_VERSION}'"
+        sh "echo 'version_tag: ${VERSION_TAG}'"
+        sh "echo 'artifact_filename: ${ARTIFACT_FILENAME}'"
+      }
+    }
+
+    stage( "NPM Install" ) {
+      steps{
+        sh 'npm install'
+      }
+    }
+
+    stage( "NPM Test" ) {
+      steps{
+          //sh 'npm run test'
+          echo 'should run npm run test'
+      }
+    }
+
+    stage( "NPM Build" ) {
+      steps{
+        sh 'npm run build'
+        // also copy our deploy folder to be packaged with build
+        sh 'cp -rv deploy build/'
+        sh 'cp -rv node_modules build/'
+      }
+    }
+
+    stage( "tag the commit with date time" ) {
+      when { expression { return params.TAG_GIT }}
+      steps{
+        echo 'Tagging this version and pushing tag to remote repository'
+        sh "git tag -a ${VERSION_TAG} -m 'Release Candidate ${VERSION_TAG}' "
+        sshagent(["${GIT_CREDSID}"]) {
+          sh "git push git@github.com:${GIT_PROJECT}.git --tags"
+        }
+      }
+    }
+
+    stage( "package into zip file" ){
+      steps{
+        dir( "build" ){
+           sh "zip -r --quiet ../${ARTIFACT_FILENAME} *"
+         }
+      }
+    }
+
+    stage( "IQ Scans") {
+      steps{
+        sh "echo 'Uploading to IQ: ${NEXUS_ARTIFACTID} stage: ${NEXUS_IQ_STAGE} file: ${ARTIFACT_FILENAME}'"
+        nexusPolicyEvaluation failBuildOnNetworkError: false,
+            iqApplication: NEXUS_ARTIFACTID,
+            iqScanPatterns: [[scanPattern: ARTIFACT_FILENAME ]],
+            iqStage: NEXUS_IQ_STAGE,
+            jobCredentialsId: ''
+      }
+    } // stage
+
+    stage( "Upload to Nexus" ) {
+      steps{
+        nexusArtifactUploader artifacts: [[artifactId: NEXUS_ARTIFACTID, classifier: '', file: ARTIFACT_FILENAME, type: 'zip']],
+          credentialsId: NEXUS_CREDSID,
+          groupId: NEXUS_GROUP,
+          nexusUrl: NEXUS_SERVER,
+          nexusVersion: 'nexus3',
+          protocol: 'https',
+          repository: NEXUS_REPOSITORY,
+          version: TARGET_VERSION
+      }
+    }
+  }//end stages
+}//end pipeline
