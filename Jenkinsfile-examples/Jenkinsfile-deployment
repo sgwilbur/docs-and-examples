@@ -1,0 +1,140 @@
+/*
+This pipeline example is to deploy an application stored in Nexus.  It is assumed that a Jenkins agent is running on the
+target build environment.
+
+***Note that Jenkins is not a recommended deployment tool, however, this is an example of how
+Jenkins can be used for deployment.**
+
+Author: Sean Wilbur (sean.wilbur@perficient.com)
+*/
+
+//Leverage Jenkins shared library
+@Library('jenkins-shared-library') _
+
+pipeline
+{
+ // params.NAME are always null for LabelParamters, just reference by NAME instead...
+ // https://issues.jenkins-ci.org/browse/JENKINS-43720
+ agent { label DEPLOY_ENV }
+
+ options{
+   disableConcurrentBuilds()
+   // prevents checkout from automatically happen on deployment nodes
+   skipDefaultCheckout()
+ }
+
+ environment
+ {
+   // job variables
+   TARGET_APPLICATION=''
+   ARTIFACT_FILENAME=''
+   NEXUS_BASE_URI=''
+ }
+
+ parameters {
+
+  string(
+    name: 'DEPLOY_ENV',
+    defaultValue: '',
+    description: 'Label to apply to this deployment, will be used to select deployment environment')
+  string(
+    name: 'NEXUS_REPOSITORY',
+    defaultValue: 'RCRepo',
+    description: 'Nexus Repository to source the artifact from.')
+  string(
+    name: 'NEXUS_GROUP',
+    defaultValue: 'MyGroup',
+    description: 'Nexus Group')
+  string(
+    name: 'NEXUS_ARTIFACTID',
+    defaultValue: 'AppName',
+    description: 'Nexus Artifact ID')
+  string(
+    name: 'TARGET_VERSION',
+    defaultValue: '0.0.0-20171209-151005',
+    description: 'Version to be deployed.')
+ }
+
+ stages
+ {
+    stage( "Verify Input")
+    {
+      steps{
+        script{
+          if ( !(params.DEPLOY_ENV && params.NEXUS_REPOSITORY && params.NEXUS_GROUP && params.NEXUS_ARTIFACTID && params.TARGET_VERSION) ) {
+            error("One of the parameters is not defined properly")
+          }
+
+          ARTIFACT_FILENAME="${params.NEXUS_ARTIFACTID}-${params.TARGET_VERSION}.zip"
+          NEXUS_BASE_URI = "repository/${params.NEXUS_REPOSITORY}/${params.NEXUS_GROUP}/${params.NEXUS_ARTIFACTID}"
+        }
+
+        sh "echo '        DEPLOY_ENV: ${params.DEPLOY_ENV}'"
+        sh "echo '  NEXUS_REPOSITORY: ${params.NEXUS_REPOSITORY}'"
+        sh "echo '       NEXUS_GROUP: ${params.NEXUS_GROUP}'"
+        sh "echo '  NEXUS_ARTIFACTID: ${params.NEXUS_ARTIFACTID}'"
+        sh "echo '    TARGET_VERSION: ${params.TARGET_VERSION}'"
+        sh "echo '    NEXUS_BASE_URI: ${NEXUS_BASE_URI}'"
+        sh "echo ' ARTIFACT_FILENAME: ${ARTIFACT_FILENAME}'"
+      }
+    }
+
+    stage( "Clean Workspace" )
+    {
+      steps{
+        deleteDir()
+      }
+    }
+    stage( "Download Artifact from Nexus" )
+    {
+      steps
+      {
+        script
+        {
+            // create base url to fetch artifact
+          def base_url = "${env.NEXUS_URL}/${NEXUS_BASE_URI}/${params.TARGET_VERSION}/${ARTIFACT_FILENAME}"
+
+          sh "echo ${base_url}"
+          sh "wget --no-check-certificate --quiet ${base_url}"
+        }
+      }
+    }
+
+    stage( 'Extract' ){
+      steps{
+        sh "unzip -q ${ARTIFACT_FILENAME}"
+      }
+    }
+
+    stage( 'Lookup Target Environment' )
+    {
+      steps{
+       script{
+        def ecosystem = readJSON file: 'ecosystem.json'
+        // Found silly issue where the default GStringImpl cannot be used to
+        // directly compare to the values that are default String objects
+        def env_match_string = "env_${DEPLOY_ENV}" as String
+        TARGET_APPLICATION = ''
+        ecosystem.apps.each{ app ->
+          if( app.keySet().contains( env_match_string ) ){
+            TARGET_APPLICATION = app.name
+          }
+        }
+
+        currentBuild.displayName = "${BUILD_NUMBER}_${params.DEPLOY_ENV}_${params.TARGET_VERSION}"
+       }
+       sh "echo 'TARGET_APPLICATION: ${TARGET_APPLICATION}'"
+      }
+    }
+
+    stage( 'Deploy' ){
+      steps{
+        sh "mv ${ARTIFACT_FILENAME} ${TARGET_APPLICATION}-${params.TARGET_VERSION}.zip"
+        sh "./deploy/deploy-nodeapp.sh ${TARGET_APPLICATION} ${params.TARGET_VERSION} ${DEPLOY_ENV}"
+        // cleanup old versions on the machine
+        sh "./deploy/cleanup-old-versions.sh ${TARGET_APPLICATION} ${params.TARGET_VERSION}"
+      }
+    }
+
+ } // end stages
+} //end pipeline
