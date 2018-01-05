@@ -1,0 +1,179 @@
+/*
+This pipeline example was used as a caller for Jenkinsfile-deployment.  In our scenario we wanted to use 1 deployment process for
+multiple environments.  In Jenkins a job was created for each environment (QA, QA2, UAT, UAT2, etc.) from this Jenkinsfile but with
+default parameters set for that specific environment.  Then this Jenkins job will call the Jenkinsfile-deployment job using the
+Jenkins call downstream jobs plugin.  The build that is deployed is either the latest date stamp of a specific semantic version or
+the user can specify a specific 
+
+***Note that Jenkins is not a recommended deployment tool, however, this is an example of how Jenkins can be used for deployment.***
+
+Author: Sean Wilbur (sean.wilbur@perficient.com)
+*/
+
+//Leverage Jenkins shared library
+@Library('jenkins-shared-library') _
+
+pipeline
+{
+ agent { label 'nodejs' }
+
+ options{
+   disableConcurrentBuilds()
+   // prevents checkout from automatically happen on deployment nodes
+   skipDefaultCheckout()
+ }
+
+ environment
+ {
+   // global system defined
+   DOWNSTREAM_JOB_NAME='/Jenkins Folder Path/Jenkinsfile-deployment' //Job path and name for Jenkins job that leverages Jenkinsfile-deployment
+   // job variables
+   TARGET_VERSION=''
+   TARGET_APPLICATION=''
+   SHOULD_DEPLOY = 1
+ }
+
+ parameters {
+
+/*
+ // Must be defined explicitly in job for environment deployment, or the default values will be overwritten every time the job runs.
+  string(
+    name: 'DEPLOY_ENV',
+    defaultValue: '',
+    description: 'Label to apply to this deployment, will be used to select deployment environment')
+  string(
+    name: 'TARGET_VERSION_PATTERN',
+    defaultValue: '0.0.0-.*',
+    description: 'Version regular expression pattern to use to lookup version to be deployed.')
+*/
+  string(
+    name: 'NEXUS_REPOSITORY',
+    defaultValue: 'RC-Repo',
+    description: 'Nexus Repository to source the artifact from.')
+  string(
+    name: 'NEXUS_GROUP',
+    defaultValue: 'MyGroup',
+    description: 'Nexus Group')
+  string(
+    name: 'NEXUS_ARTIFACTID',
+    defaultValue: 'AppName',
+    description: 'Nexus Artifact ID')
+
+ }
+
+ stages
+ {
+    stage( "Verify Parameter Input")
+    {
+      steps{
+        sh "echo '            DEPLOY_ENV: ${params.DEPLOY_ENV}'"
+        sh "echo '      NEXUS_REPOSITORY: ${params.NEXUS_REPOSITORY}'"
+        sh "echo '           NEXUS_GROUP: ${params.NEXUS_GROUP}'"
+        sh "echo '      NEXUS_ARTIFACTID: ${params.NEXUS_ARTIFACTID}'"
+        sh "echo 'TARGET_VERSION_PATTERN: ${params.TARGET_VERSION_PATTERN}'"
+        script{
+          if ( !(params.DEPLOY_ENV && params.NEXUS_REPOSITORY && params.NEXUS_GROUP && params.NEXUS_ARTIFACTID && params.TARGET_VERSION_PATTERN ) ) {
+            error("One of the parameters is not defined properly")
+          }
+        }
+      }
+    }
+
+    stage( "Pre-Work"){
+      parallel {
+
+        stage( "Checkout Source" ){
+            steps{
+              checkout scm
+            }
+        } // end checkout
+
+        stage( "Find latest version to deploy" )
+        {
+          when { expression { DEPLOY_ENV != '' }}
+          steps
+          {
+            sh "echo 'Using TARGET_VERSION_PATTERN: [${params.TARGET_VERSION_PATTERN}]'"
+            script{
+
+              def versions = getNexusVersions NEXUS_URL, NEXUS_REPOSITORY, NEXUS_GROUP, NEXUS_ARTIFACTID, TARGET_VERSION_PATTERN
+              // empty TARGET_VERSION will force deployment to be skipped
+              TARGET_VERSION=''
+              if( versions )
+              {
+                  TARGET_VERSION = versions[0]
+                  echo "Selecting latest version from Nexus: ${TARGET_VERSION}"
+              }else{
+                echo "ERROR: No version selected, no deployment will be called."
+                currentBuild.result = 'FAILURE'
+              }
+
+            }
+          }
+        } // end Find latest
+      } // end parallel
+    } // end pre-work
+
+    // This shared lib method requires that the source is checked out as it is
+    // reading the ecosystem.js file.
+    stage( "Lookup Target Application" ){
+      when { expression { DEPLOY_ENV != '' && TARGET_VERSION != '' } }
+        // Need to lookup target application
+        steps{
+          script{
+            TARGET_APPLICATION = getTargetEnvFromEcosystem DEPLOY_ENV
+          }
+        }
+    }
+
+
+    stage( "Check if Already Deployed" ){
+      when { expression { DEPLOY_ENV != '' && TARGET_VERSION != '' && TARGET_APPLICATION != '' } }
+      agent { label env.DEPLOY_ENV }
+        // go to DEPLOY_ENV
+        // see if /data/nodejs/<TARGET_APPLICATION>/source.<TARGET_VERSION> exists
+      steps{
+        script{
+          def status = ''
+          // should exist
+          status = sh script: "[ -d \"/data/nodejs/${TARGET_APPLICATION}/source.${TARGET_VERSION}\" ]", returnStatus: true
+          println status
+
+          if ( status ){
+            println "Directory does not exist! Proceed with deployment."
+            SHOULD_DEPLOY = 1
+          }else{
+            println "Directory is in place, we should skip this deployment."
+            SHOULD_DEPLOY = 0
+            currentBuild.result = 'SUCCESS'
+            return
+          }
+        }
+      }
+
+    }
+
+    stage( "Call downstream deployment job" ){
+      when { expression{ SHOULD_DEPLOY && TARGET_VERSION != '' } }
+      steps{
+        sh "echo ' Calling '"
+        sh "echo '            DEPLOY_ENV: ${params.DEPLOY_ENV}'"
+        sh "echo '      NEXUS_REPOSITORY: ${params.NEXUS_REPOSITORY}'"
+        sh "echo '           NEXUS_GROUP: ${params.NEXUS_GROUP}'"
+        sh "echo '      NEXUS_ARTIFACTID: ${params.NEXUS_ARTIFACTID}'"
+        sh "echo '        TARGET_VERSION: ${TARGET_VERSION}'"
+
+        build job: DOWNSTREAM_JOB_NAME,
+          parameters: [
+            string( name: 'DEPLOY_ENV',        value: params.DEPLOY_ENV ),
+            string( name: 'NEXUS_REPOSITORY',  value: params.NEXUS_REPOSITORY ),
+            string( name: 'NEXUS_GROUP',       value: params.NEXUS_GROUP ),
+            string( name: 'NEXUS_ARTIFACTID',  value: params.NEXUS_ARTIFACTID ),
+            string( name: 'TARGET_VERSION',    value: TARGET_VERSION )
+          ]
+      }
+    }
+
+ } // end stages
+
+} //end pipeline
