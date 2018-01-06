@@ -33,7 +33,7 @@ For one branch SCM model( like iOS/Android ) <br/>
 OLB UI - Build master CI  --- Build <br/>
 OLB UI - Build master RC  --- Release <br/>
 
-For two branch (4 build) model ( like OLB ) <br/>
+For two branch (4 build) model ( like JPetStore ) <br/>
 OLB UI - Build develop CI --- Develop <br/>
 OLB UI - Build develop RC --- Stage Release <br/>
 OLB UI - Build master CI  --- Build <br/>
