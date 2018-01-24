@@ -1,3 +1,7 @@
+<p align="center">
+  <img width="460" height="300" src="./images/perficientlogosmall.jpg">
+</p>
+
 # DocumentationandExamples
 Team documentation and examples
 
