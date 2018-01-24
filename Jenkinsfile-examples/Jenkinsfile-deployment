@@ -7,6 +7,8 @@ Nexus Repo then uses a deployment script that was stored in the package for the 
 Jenkins can be used for deployment.**
 
 Author: Sean Wilbur (sean.wilbur@perficient.com)
+
+© 2018 Perficient, Inc. All Rights Reserve
 */
 
 //Leverage Jenkins shared library

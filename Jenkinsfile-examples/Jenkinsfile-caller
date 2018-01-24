@@ -3,11 +3,13 @@ This pipeline example was used as a caller for Jenkinsfile-deployment.  In our s
 multiple environments.  In Jenkins a job was created for each environment (QA, QA2, UAT, UAT2, etc.) from this Jenkinsfile but with
 default parameters set for that specific environment.  Then this Jenkins job will call the Jenkinsfile-deployment job using the
 Jenkins call downstream jobs plugin.  The build that is deployed is either the latest date stamp of a specific semantic version or
-the user can specify a specific 
+the user can specify a specific
 
 ***Note that Jenkins is not a recommended deployment tool, however, this is an example of how Jenkins can be used for deployment.***
 
 Author: Sean Wilbur (sean.wilbur@perficient.com)
+
+© 2018 Perficient, Inc. All Rights Reserve
 */
 
 //Leverage Jenkins shared library

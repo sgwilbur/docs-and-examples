@@ -6,6 +6,8 @@ considered release candidates that could be deployed to any environment.
 Authors:
 Sean Wilbur (sean.wilbur@perficient.com)
 Geoff Rosenthal (geoffrey.rosenthal@perficient.com)
+
+© 2018 Perficient, Inc. All Rights Reserve
 */
 
 //Leverage Jenkins shared library
