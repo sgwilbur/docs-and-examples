@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="./images/perficientlogosmall.jpg">
+  <img src="./images/perficientlogolarge.png">
 </p>
 
 # DocumentationandExamples
