@@ -1,0 +1,89 @@
+/*
+This pipeline example is to "promote" a package stored in one Nexus Repo repository to another
+repository.  For example, if you're using a release candidtate repository to store all build candidtates
+you'll then need a releases repository to store the candidates that are actually deployed to production.
+The process also promotes the build to the operate Nexus IQ application stage.
+
+Author: Geoff Rosenthal (geoffrey.rosenthal@perficient.com)
+*/
+
+
+pipeline{
+
+  agent any
+
+  parameters {
+  choice(
+        //There are a fixed set of apps in Repo.
+        name: 'APP_ID',
+        choices: 'App1\nApp2\nApp3',
+        description: 'Artifact identifier for Nexus Repo'
+    )
+    string(
+        name: 'VERSION',
+        defaultValue: '0.0.0-20180101-110620',
+        description: 'Desired artifact version'
+    )
+    string(
+        name: 'NEXUS_IQ_STAGE',
+        defaultValue: 'release',
+        description: 'Name of Nexus IQ stage for scanning'
+    )
+  }//End parameters
+
+   environment {
+
+    NEXUS_GROUP = "MyGroup"
+    SRC_REPO = "SrcRepo"
+    TARGET_REPO = "ReleasesRepo"
+    NEXUS_BASE_URI = "repository/${SRC_REPO}/${NEXUS_GROUP}/${APP_ID}"
+    NEXUS_BASE_URL = "https://mycomany.nexus.com"
+    ARTIFACT_FILENAME="${APP_ID}-${VERSION}.zip"
+    SRC_URL="${NEXUS_BASE_URL}/${NEXUS_BASE_URI}/${VERSION}/${ARTIFACT_FILENAME}"
+
+  }//End environment
+
+   stages{
+    // Cleanup the workspace to start from scratch
+    stage( "Clean WorkSpace" ) {
+      steps{
+        cleanWs()
+      }
+    }//End clean workspace
+
+    stage("Download Artifact from Source Repo"){
+        steps{
+            echo "SRC URL: ${env.SRC_URL}"
+            sh 'wget --no-check-certificate --quiet ${SRC_URL}'
+        }
+    }//End download artifact from source repo
+
+    stage( "Upload to Target Repo" ) {
+      steps{
+        nexusArtifactUploader artifacts: [[artifactId: APP_ID, classifier: '',
+          file: ARTIFACT_FILENAME, type: 'zip']],
+          credentialsId: NEXUS_CREDSID,
+          groupId: NEXUS_GROUP,
+          nexusUrl: NEXUS_SERVER,
+          nexusVersion: 'nexus3',
+          protocol: 'https',
+          repository: TARGET_REPO,
+          version: VERSION
+      }//End steps
+    }//End upload to release repo
+
+    stage( 'IQ Scan') {
+      steps{
+        sh "echo 'Uploading to IQ: ${ARTIFACT_FILENAME}'"
+        sh "echo 'IQ Stage: ${NEXUS_IQ_STAGE}'"
+
+                nexusPolicyEvaluation failBuildOnNetworkError: false,
+                iqApplication: APP_ID,
+                iqScanPatterns: [[scanPattern: ARTIFACT_FILENAME ]],
+                iqStage: NEXUS_IQ_STAGE,
+                jobCredentialsId: ''
+      }
+    } // End Set Release IQ Scan
+
+   }//End stages
+}//End pipeline
