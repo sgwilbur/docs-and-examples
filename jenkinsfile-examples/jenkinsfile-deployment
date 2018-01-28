@@ -3,9 +3,6 @@ This pipeline example is to deploy an application stored in Nexus.  It is assume
 target build environment.  In this example, this job is actually a wrapper that downloads the release candidate from
 Nexus Repo then uses a deployment script that was stored in the package for the deployment steps.
 
-***Note that Jenkins is not a recommended deployment tool, however, this is an example of how
-Jenkins can be used for deployment.**
-
 Author: Sean Wilbur (sean.wilbur@perficient.com)
 
 © 2018 Perficient, Inc. All Rights Reserve
