@@ -1,20 +1,15 @@
 <p align="center">
-  <img src="./images/perficientlogolarge.png">
+  <img src="./images/perficientlogolarge.png" width="45%"/>
 </p>
 
-# DocumentationandExamples
-Team documentation and examples
+## Docs and Examples
+Here the Perficient DevOps practice will share best practices, documentation, examples of our work, and other assets. This is a public repository therefore please make every effort to scrub all assets of customer information.
 
-This repository is intended for the Perficient DevOps Practice to post documentation and examples.  Note that this is a public repository, thus any customer proprietary/specific information must be removed from all material BEFORE posting to this repository.
+### Markdown pages
+These pages contain information on various topics.
 
-## Markdown Pages
-These pages contain information on various topics as specified in the file name.
+### Jenkinsfile examples
+Real, working examples of Jenkins pipeline jobs to perform various actions. These scripts were taken from customer engagements or working demos.
 
-## Jenkinsfile-examples
-Contains real, working examples of Jenkins pipeline jobs to perform various actions.  These jobs were taken from customer engagements or working demos.
-
-## Word-Docs
-Contains example documentation from customer engagements, however, all customer specific information should be removed from these examples.  Instead these examples should use standard Perficient logos and formatting.  
-
-## images
-Contains image files for markdown pages.
+### MS Word documents
+Example assets from engagements
