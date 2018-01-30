@@ -171,6 +171,7 @@ pipeline{
     }//End Package into zip file
 
     stage( "Perform Nexus IQ Scan") {
+      //Uses Nexus IQ connection as defined in Jenkins Master->Configure System
       steps{
             sh "echo 'Uploading to IQ: ${NEXUS_ARTIFACTID} stage: ${NEXUS_IQ_STAGE} file: ${ARTIFACT_FILENAME}'"
           	nexusPolicyEvaluation failBuildOnNetworkError: false,
