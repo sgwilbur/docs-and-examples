@@ -169,8 +169,8 @@ pipeline{
           protocol: 'https',
           repository: NEXUS_REPOSITORY,
           version: TARGET_VERSION
-      }
-    }
+      }// End step
+    }//End upload stage
   }//end stages
 /*
   post {
