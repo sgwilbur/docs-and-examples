@@ -1,0 +1,67 @@
+/*
+This pipeline example shows how to use the UrbanCode Deploy REST API to request a deployment from Jenkins.
+This example negates the need to use the UCD plugin for Jenkins.  Instead it makes the request to UCD using
+curl with the UCD REST API.  A json file is required to store the request parameters.  The stage 'Setup
+Deployment Process' builds the json file.  It would probably be more appropriate to store the json file with
+your source code instead of creating it with Jenkins, but I wanted to provide the example.
+
+Author:  Geoff Rosenthal (geoffrey.rosenthal@perficient.com)
+
+© 2018 Perficient, Inc. All Rights Reserve
+*/
+
+pipeline {
+    agent any
+
+     environment {
+        UCD_SERVER = 'https://deploy.devopsinabox.perficientdevops.com'
+        UCD_REQPROCESS = "${UCD_SERVER}" + '/cli/applicationProcessRequest/request'
+    }
+
+    stages{
+          stage('Setup Deployment Process'){
+            //Builds applicationDeploy.json file with parameters for application deployment
+            // For more info see: https://www.ibm.com/support/knowledgecenter/en/SS4GSP_6.2.7/com.ibm.udeploy.api.doc/topics/udclient_requestapplicationprocess.html
+            steps{
+                sh 'rm -f applicationDeploy.json'  //Delete file if it already exists
+                sh 'touch applicationDeploy.json' //Create clean file
+                sh 'echo "{" >> applicationDeploy.json'
+                sh 'echo "\\"application\\" : \\"JPetStore\\"," >> applicationDeploy.json'
+                sh 'echo "\\"applicationProcess\\": \\"Deploy\\","  >> applicationDeploy.json'
+                sh 'echo "\\"environment\\": \\"Development\\"," >> applicationDeploy.json'
+                sh 'echo "\\"onlyChanged\\": \\"false\\"," >> applicationDeploy.json'
+                sh 'echo "\\"versions\\": [{" >> applicationDeploy.json'
+
+                //Parameters for JPetStore-app
+                sh 'echo "\\"version\\": \\"6.0.4_20180221-173141\\"," >> applicationDeploy.json'
+                sh 'echo "\\"component\\": \\"JPetStore-app\\"" >> applicationDeploy.json'
+                sh 'echo "}," >> applicationDeploy.json'
+
+                //Paramters for JPetstore-DB
+                sh 'echo "{" >> applicationDeploy.json'
+                sh 'echo "\\"version\\": \\"1.1\\"," >> applicationDeploy.json'
+                sh 'echo "\\"component\\": \\"JPetStore-DB\\"" >> applicationDeploy.json'
+                sh 'echo "}," >> applicationDeploy.json'
+
+                //Parameters for JPetstore-web
+                sh 'echo "{" >> applicationDeploy.json'
+                sh 'echo "\\"version\\": \\"1.0\\"," >> applicationDeploy.json'
+                sh 'echo "\\"component\\": \\"JPetStore-web\\"" >> applicationDeploy.json'
+
+                sh 'echo "}]" >> applicationDeploy.json'
+                sh 'echo "}" >> applicationDeploy.json'
+            }//End steps
+        }//End setup deployment process
+
+        stage('Deploy Application'){
+            steps{
+               //Use stored Jenkins credential UCD-Login which stores the UCD login to use to request deployment
+                withCredentials([usernameColonPassword(credentialsId: 'UCD-Login', variable: 'UCDLOGIN')]) {
+                   //For more info see: https://www.ibm.com/support/knowledgecenter/en/SS4GSP_6.2.7/com.ibm.udeploy.reference.doc/topics/rest_api_ref_example.html
+                    sh 'curl --fail -k -u $UCDLOGIN $UCD_REQPROCESS -X PUT -d @applicationDeploy.json'
+                }//End with credentials
+            }//End steps
+        }//End stage Deploy Application
+        
+    }//End stages
+}//End pipeline
