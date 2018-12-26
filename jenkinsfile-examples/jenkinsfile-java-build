@@ -1,0 +1,53 @@
+/*
+This pipeline build example is for a Java application using Maven.  The stages within this pipeline will build the app, 
+run unit tests, install the app into both local and Jenkin's local Maven repositories, then finally runs and displays executed
+output on the Jenkins UI. This build is intended to be a developer quick test and serves as a basis for 
+building more complex Java apps with Maven in Jenkins.
+
+Authors:
+Chad Lei (chad.lei@perficient.com)
+
+© 2018 Perficient, Inc. All Rights Reserve
+*/
+
+pipeline {
+    agent {
+        docker {
+            // Downloads maven:3-apline Docker image 
+            // Runs image as a separate container
+            image 'maven:3-alpine'
+            
+            // Ensures artifacts necessary to build Java app are retained
+            // (prevents need for redownloading in future runs)
+            args '-v /root/.m2:/root/.m2'
+        }
+    }
+    stages {
+        stage('Build') {
+            // Runs a clean build of the app without running tests
+            steps {
+                sh 'mvn -B -DskipTests clean package'
+            }
+        }
+        stage('Test') { 
+            // Runs the unit test & generates a JUnit XML report
+            steps {
+                sh 'mvn test' 
+            }
+            // Archives the JUnit XML report and results are then
+            // able to be reviewed through the Jenkins interface
+            post {
+                always {
+                    junit 'target/surefire-reports/*.xml' 
+                }
+            }
+        }
+        stage('Deliver') { 
+            // Runs shell script that installs app into local Maven repository & Jenkins's local Maven repository 
+            // Then, runs and outputs the execution of the Java app to the Jenkins UI
+            steps {
+                sh './jenkins/scripts/deliver.sh' 
+            }
+        }
+    }
+}
